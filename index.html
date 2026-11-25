@@ -1,4 +1,3 @@
-HTML_CONTENT = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -38,7 +37,12 @@ HTML_CONTENT = """
             <div><div style="color:var(--muted);font-size:14px;">Баланс</div><div class="balance-value"><span id="balance">0.0000</span> <span>TON CRY</span></div></div>
             <div><div style="color:var(--muted);font-size:14px;">Мощность</div><div class="balance-value"><span id="hashrate">0</span> <span>GH/s</span></div></div>
         </div>
-        <div class="fan-container"><div class="fan inactive" id="fan"><svg viewBox="0 0 100 100"><path d="M50 10 A40 40 0 0 1 90 50 L50 50 Z"/><path d="M90 50 A40 40 0 0 1 50 90 L50 50 Z"/><path d="M50 90 A40 40 0 0 1 10 50 L50 50 Z"/><path d="M10 50 A40 40 0 0 1 50 10 L50 50 Z"/></svg></div></div>
+        <!-- Упрощенный вентилятор (чтобы не было багов с отображением) -->
+        <div class="fan-container">
+            <div class="fan inactive" id="fan" style="background: radial-gradient(circle, #4a0e8f, #10002b); display:flex; justify-content:center; align-items:center;">
+                <div style="width: 120px; height: 120px; border-radius: 50%; border: 10px solid #9d4edd; border-top-color: transparent; border-bottom-color: transparent;"></div>
+            </div>
+        </div>
         <div class="status-text" id="status-text">Майнинг не запущен</div>
         <div class="status-sub">Арендуйте сервер для старта</div>
         <button class="btn" onclick="claim()" id="claim-btn" style="display:none; background:var(--green);">Забрать награду</button>
@@ -68,6 +72,7 @@ HTML_CONTENT = """
     <script>
         const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
         const user = tg.initDataUnsafe?.user || {id: 123456789};
+        // ВСТАВЬ СЮДА ССЫЛКУ ОТ CLOUDFLARED (из Termux)
         const API = ""; 
         
         const urlParams = new URLSearchParams(window.location.search);
@@ -84,37 +89,64 @@ HTML_CONTENT = """
         }
 
         async function fetchData() {
-            const res = await fetch(API + '/api/user?id=' + user.id);
-            const data = await res.json();
-            document.getElementById('balance').innerText = data.balance.toFixed(4);
-            document.getElementById('hashrate').innerText = data.hashrate;
-            const fan = document.getElementById('fan');
-            if (data.hashrate > 0) {
-                fan.classList.remove('inactive');
-                document.getElementById('status-text').innerText = "Майнинг активен";
-                document.getElementById('claim-btn').style.display = 'block';
-            }
+            if (!API) return; // Если API не указан, ничего не грузим
+            try {
+                const res = await fetch(API + '/api/user', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ init_data: tg.initData })
+                });
+                const data = await res.json();
+                document.getElementById('balance').innerText = data.balance.toFixed(4);
+                document.getElementById('hashrate').innerText = data.hashrate;
+                const fan = document.getElementById('fan');
+                if (data.hashrate > 0) {
+                    fan.classList.remove('inactive');
+                    document.getElementById('status-text').innerText = "Майнинг активен";
+                    document.getElementById('claim-btn').style.display = 'block';
+                }
+            } catch(e) { console.log("API выключен"); }
         }
 
-        async function claim() { await fetch(API + '/api/claim?id=' + user.id, {method: 'POST'}); fetchData(); tg.showAlert("Получено!"); }
+        async function claim() { 
+            if (!API) return;
+            await fetch(API + '/api/claim', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ init_data: tg.initData })
+            }); 
+            fetchData(); 
+            tg.showAlert("Получено!"); 
+        }
         
         async function buy(price, income) {
+            if (!API) return;
             if (confirm(`Купить за ${price} TON? (Тест)`)) {
-                await fetch(API + '/api/buy', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: user.id, income: income})});
+                await fetch(API + '/api/buy', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ init_data: tg.initData, income: income})
+                });
                 fetchData(); tg.showAlert("Куплено!");
             }
         }
 
         async function withdraw() {
+            if (!API) return;
             const w = document.getElementById('wallet').value;
             if (!w) return tg.showAlert("Введите кошелек!");
-            const res = await fetch(API + '/api/withdraw', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: user.id, wallet: w})});
+            const res = await fetch(API + '/api/withdraw', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ init_data: tg.initData, wallet: w})
+            });
             const d = await res.json();
             tg.showAlert(d.msg || d.detail);
         }
 
         async function loadAdmin() {
-            const res = await fetch(API + '/api/admin?admin_id=' + user.id);
+            if (!API) return;
+            const res = await fetch(API + '/api/admin', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ init_data: tg.initData })
+            });
             const data = await res.json();
             document.getElementById('stats').innerHTML = `<p>Юзеров: <b>${data.users}</b></p><p>Выплачено: <b>${data.paid} TON</b></p>`;
             const wDiv = document.getElementById('withdraws');
@@ -124,10 +156,16 @@ HTML_CONTENT = """
             });
         }
 
-        async function approve(id) { await fetch(API + '/api/approve?id=' + id + '&admin_id=' + user.id, {method: 'POST'}); loadAdmin(); }
+        async function approve(id) { 
+            if (!API) return;
+            await fetch(API + '/api/approve', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify({ init_data: tg.initData, withdraw_id: id })
+            }); 
+            loadAdmin(); 
+        }
 
         fetchData();
     </script>
 </body>
 </html>
-"""
